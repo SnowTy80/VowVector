@@ -299,7 +299,7 @@ Raw Documents (PDF, DOCX, XLSX, CSV, TXT, Images)
   ├──▶ Text extraction (PyMuPDF for PDF, python-docx, openpyxl, etc.)
   ├──▶ OCR for scanned/graphical PDFs (Tesseract default, Nanonets optional)
   ├──▶ PII sanitization (Presidio NER + regex: names, orgs, dollars, addresses, phones)
-  ├──▶ Auto-tagging (CSI divisions, trades, materials, document type, section numbers)
+  ├──▶ Auto-tagging (document type, topic keywords, domain labels, section headings)
   ├──▶ Text chunking (3000/200 — matching the main pipeline exactly)
   │
   └──▶ Structured JSON output (compatible with NodeCreate schema)
@@ -333,7 +333,7 @@ Optional: to enable Nanonets OCR, place `Nanonets-OCR-s-Q8_0.gguf` at
 | Folder path            | Text input for batch processing an entire directory          |
 | Node type dropdown     | Select node type for the batch (Note, Code, Research, etc.)  |
 | Enable OCR             | Toggle OCR for scanned documents                             |
-| Graphical PDF          | Force OCR on all pages (for construction drawings/plans)     |
+| Graphical PDF          | Force OCR on all pages (for scans, diagrams, or slides)      |
 | OCR engine             | Tesseract (default, no GPU) or Nanonets (via Ollama)         |
 | PII redaction toggles  | Person names, organizations, dollar amounts, addresses, phones|
 | Output directory       | Where to save formatted JSON files                           |
@@ -344,25 +344,25 @@ Each processed document produces a JSON file compatible with the VowVector backe
 
 ```json
 {
-  "title": "Electrical Specification - Section 260500",
+  "title": "System Design Notes - Authentication Flow",
   "content": "Full extracted and sanitized text...",
   "node_type": "Research",
-  "tags": ["pdf", "spec", "electrical", "division-26", "material:copper", "formatted"],
+  "tags": ["pdf", "design-notes", "auth", "security", "formatted"],
   "metadata": {
-    "source_file": "Electrical_Spec_260500.pdf",
+    "source_file": "auth_design_notes.pdf",
     "file_size": 245760,
     "ctx_size": 15234,
     "ctx_bucket": "large",
     "chunk_count": 6,
     "chunked": true,
-    "doc_type": "spec",
+    "doc_type": "design",
     "extraction_method": "native_text",
     "page_count": 12,
     "sanitized": true,
     "redaction_count": 7,
-    "trades": ["Division 26 - Electrical"],
-    "materials": ["copper", "conduit", "wire"],
-    "sections": ["260500"],
+    "topics": ["authentication", "security", "user-flows"],
+    "keywords": ["token", "session", "oauth"],
+    "sections": ["Auth Overview", "Token Lifecycle"],
     "formatter_version": "1.0.0",
     "processed_at": "2026-02-02T15:30:00Z"
   },
@@ -376,19 +376,19 @@ The tagger automatically detects and labels:
 
 | Tag Category   | Examples                                            | Purpose                        |
 |----------------|-----------------------------------------------------|--------------------------------|
-| Document type  | `spec`, `bid`, `drawing`, `rfi`, `submittal`        | Classify the document          |
-| CSI trades     | `Division 26 - Electrical`, `Division 23 - HVAC`    | Link to trade-specific nodes   |
-| Materials      | `copper`, `conduit`, `steel`, `transformer`          | Material entity connections    |
-| Section codes  | `260500`, `010320`                                   | CSI MasterFormat references    |
+| Document type  | `report`, `design`, `proposal`, `paper`, `notes`    | Classify the document          |
+| Domain labels  | `security`, `ml`, `frontend`, `backend`             | Link to topic-specific nodes   |
+| Keywords       | `oauth`, `vector-db`, `webgl`, `prompt`             | Surface searchable concepts    |
+| Section titles | `Overview`, `Methods`, `Results`, `Appendix`        | High-level outline references  |
 
-These tags enable future auto-connection of nodes in Neo4j based on shared trades, materials, or document sections.
+These tags enable future auto-connection of nodes in Neo4j based on shared topics, keywords, or document sections.
 
 ### OCR Modes
 
 | Mode                    | When to Use                                         | Engine    |
 |-------------------------|-----------------------------------------------------|-----------|
 | Auto OCR (default)      | Scanned PDFs with <50 chars/page average            | Tesseract |
-| Graphical PDF (toggle)  | Construction drawings, plans, CAD-generated PDFs    | Tesseract |
+| Graphical PDF (toggle)  | Slide decks, diagrams, or image-heavy PDFs          | Tesseract |
 | Nanonets (optional)     | Complex layouts needing higher accuracy (requires Ollama) | Nanonets-OCR-s |
 
 ### Sanitization
@@ -398,7 +398,7 @@ PII redaction replaces sensitive data with typed markers:
 | Data Type      | Example Before                  | Example After                |
 |----------------|---------------------------------|------------------------------|
 | Person name    | `John Smith`                    | `[REDACTED_PERSON]`          |
-| Organization   | `Turner Construction`           | `[REDACTED_ORGANIZATION]`    |
+| Organization   | `Acme Analytics`                | `[REDACTED_ORGANIZATION]`    |
 | Dollar amount  | `$45,000.00`                    | `[REDACTED_DOLLAR_AMOUNT]`   |
 | Phone number   | `(520) 555-1234`                | `[REDACTED_PHONE_NUMBER]`    |
 | Location       | `Tucson, Arizona`               | `[REDACTED_LOCATION]`        |
@@ -698,7 +698,7 @@ VowVector/
 │           └── node-renderer.js       # Three.js Phong + Fresnel + halo rendering
 ├── formatter/
 │   ├── app.py                         # Streamlit GUI
-│   ├── config.py                      # Paths, constants, regex patterns, CSI divisions
+│   ├── config.py                      # Paths, constants, regex patterns, domain labels
 │   ├── requirements.txt               # Python dependencies
 │   ├── setup.sh                       # Automated setup (venv, deps, spaCy, OCR model)
 │   ├── core/
@@ -707,7 +707,7 @@ VowVector/
 │   │   ├── extractor.py               # Text extraction: PDF, DOCX, XLSX, CSV, TXT, images
 │   │   ├── ocr.py                     # Tesseract + Nanonets/Ollama OCR engines
 │   │   ├── sanitizer.py               # PII redaction (Presidio NER + regex)
-│   │   └── tagger.py                  # Auto-tagging: doc type, CSI trades, materials
+│   │   └── tagger.py                  # Auto-tagging: doc type, domains, keywords
 │   └── output/                        # Default output directory for formatted JSON (ignored)
 └── models/
     └── README.md                      # Where to place GGUF models
@@ -730,12 +730,12 @@ VowVector/
 
 | Extension             | Examples                           | Extraction Method               |
 |-----------------------|------------------------------------|---------------------------------|
-| `.pdf`                | Specs, drawings, bid packages      | PyMuPDF native text + OCR fallback |
-| `.docx`               | Specifications, RFIs, contracts    | python-docx (paragraphs + tables) |
-| `.xlsx`               | Pricing sheets, takeoffs, BOMs     | openpyxl (all sheets)           |
-| `.csv`                | Material lists, exports            | csv stdlib                      |
+| `.pdf`                | Papers, reports, slide decks       | PyMuPDF native text + OCR fallback |
+| `.docx`               | Specs, proposals, meeting notes    | python-docx (paragraphs + tables) |
+| `.xlsx`               | Metrics, inventories, datasets     | openpyxl (all sheets)           |
+| `.csv`                | Exports, logs, datasets            | csv stdlib                      |
 | `.txt`, `.md`         | Notes, logs                        | UTF-8 / Latin-1 fallback       |
-| `.png`, `.jpg`, `.jpeg`, `.tiff`, `.bmp`, `.webp` | Scanned drawings, photos | Tesseract / Nanonets OCR |
+| `.png`, `.jpg`, `.jpeg`, `.tiff`, `.bmp`, `.webp` | Screenshots, scans, photos | Tesseract / Nanonets OCR |
 
 ---
 
@@ -744,7 +744,7 @@ VowVector/
 1. **Start the stack** with `vv start`
 2. **Open the UI** at http://localhost:5173
 3. **For text/code files**: Upload directly via the 3D visualizer upload modal
-4. **For PDFs/Excel/Word/drawings**: Use the Data Formatter (`vv format start`)
+4. **For PDFs/Excel/Word/images**: Use the Data Formatter (`vv format start`)
    - Upload documents, configure OCR and sanitization settings
    - Review extracted text and auto-generated tags
    - Save formatted JSON to the output directory
@@ -761,4 +761,4 @@ VowVector/
 - Auto-connect is intentionally limited to folder groups to keep graph structure clean.
 - Embedding model GGUF files are mounted read-only from `models/`.
 - The Data Formatter runs on the host (not in Docker) and uses its own Python venv at `formatter/.venv`.
-- The Nanonets OCR model is optional. Tesseract handles most documents well. Nanonets is better for complex CAD drawing fonts.
+- The Nanonets OCR model is optional. Tesseract handles most documents well. Nanonets is better for complex layouts and stylized text.
