@@ -1,6 +1,7 @@
 # VowVector
 
-[![Stars](https://img.shields.io/github/stars/MrNoSkillz/VowVector?style=social)](https://github.com/MrNoSkillz/VowVector/stargazers)
+[![Stars](https://img.shields.io/github/stars/SnowTy80/VowVector?style=social)](https://github.com/SnowTy80/VowVector/stargazers)
+[![Forks](https://img.shields.io/github/forks/SnowTy80/VowVector?style=social)](https://github.com/SnowTy80/VowVector/network/members)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docker](https://img.shields.io/badge/docker-ready-blue)](https://www.docker.com/)
 
