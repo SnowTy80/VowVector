@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+env/
+
+# Node
+node_modules/
+
+# Docker
+.docker/
+volumes/
+neo4j_data/
+neo4j_logs/
+qdrant_data/
+ollama_data/
+
+# Models (huge files – users download separately)
+models/**/*.gguf
+
+# Runtime/data
+VowVector_data/
+data/
+uploads/
+formatter/output/
+formatter/.tmp_uploads/
+formatter/.streamlit.log
+
+# Env files
+.env
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

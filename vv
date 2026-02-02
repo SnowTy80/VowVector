@@ -1,0 +1,213 @@
+#!/usr/bin/env bash
+# VowVector CLI — start, stop, and manage the VowVector stack
+set -euo pipefail
+
+VV_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+COMPOSE_FILE="$VV_DIR/docker-compose.yml"
+FORMAT_DIR="$(cd "$VV_DIR/formatter" && pwd 2>/dev/null || echo "$VV_DIR/formatter")"
+FORMAT_VENV="$FORMAT_DIR/.venv"
+ENV_FILE="$VV_DIR/.env"
+ENV_EXAMPLE="$VV_DIR/.env.example"
+
+# Use sg docker if user is not in docker group for the current session
+docker_cmd() {
+    if docker info &>/dev/null 2>&1; then
+        "$@"
+    else
+        sg docker -c "$(printf '%q ' "$@")"
+    fi
+}
+
+compose() {
+    if [ ! -f "$ENV_FILE" ]; then
+        if [ -f "$ENV_EXAMPLE" ]; then
+            cp "$ENV_EXAMPLE" "$ENV_FILE"
+            echo "Created .env from .env.example (edit if needed)."
+        else
+            echo "Missing .env and .env.example."
+            exit 1
+        fi
+    fi
+    docker_cmd docker compose -f "$COMPOSE_FILE" "$@"
+}
+
+cmd_start() {
+    echo "Starting VowVector..."
+    compose up --build -d
+    echo ""
+    echo "Waiting for services to become healthy..."
+    # Give backend time to pass healthcheck
+    local attempts=0
+    while [ $attempts -lt 30 ]; do
+        if docker_cmd docker inspect --format='{{.State.Health.Status}}' vv-backend 2>/dev/null | grep -q healthy; then
+            break
+        fi
+        printf "."
+        sleep 2
+        ((attempts++))
+    done
+    echo ""
+
+    # Init Ollama model if needed
+    if ! curl -sf http://localhost:11434/api/tags 2>/dev/null | grep -q "nomic-embed-text"; then
+        echo "Loading embedding model..."
+        bash "$VV_DIR/scripts/init-ollama.sh"
+    fi
+
+    echo ""
+    cmd_status
+    echo ""
+    echo "VowVector is ready:"
+    echo "  UI:       http://localhost:5173"
+    echo "  API docs: http://localhost:8000/docs"
+    echo "  Neo4j:    http://localhost:7474"
+}
+
+cmd_stop() {
+    echo "Stopping VowVector..."
+    compose down
+    echo "VowVector stopped."
+}
+
+cmd_restart() {
+    cmd_stop
+    echo ""
+    cmd_start
+}
+
+cmd_status() {
+    echo "=== VowVector Status ==="
+    compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "Stack is not running."
+}
+
+cmd_logs() {
+    local service="${1:-}"
+    if [ -n "$service" ]; then
+        compose logs -f "$service"
+    else
+        compose logs -f
+    fi
+}
+
+cmd_verify() {
+    bash "$VV_DIR/scripts/verify-stack.sh"
+}
+
+cmd_reset() {
+    local flag="${1:-}"
+    if [ "$flag" = "--full" ]; then
+        echo "Full reset: removing all containers, volumes, and data..."
+        compose down -v
+        echo "Full reset complete. Run 'vv start' to rebuild."
+    else
+        echo "Soft reset: wiping graph and vector data (containers stay)..."
+        bash "$VV_DIR/scripts/clean-reset.sh"
+        echo "Soft reset complete."
+    fi
+}
+
+cmd_format() {
+    local subcmd="${1:-start}"
+    case "$subcmd" in
+        start)
+            if [ ! -d "$FORMAT_VENV" ]; then
+                echo "Data Formatter not set up yet. Run 'vv format setup' first."
+                exit 1
+            fi
+            if pgrep -f "streamlit run.*formatter/app.py" &>/dev/null; then
+                echo "Data Formatter is already running."
+                echo "  UI: http://localhost:8501"
+                exit 0
+            fi
+            echo "Starting Data Formatter..."
+            # shellcheck disable=SC1091
+            source "$FORMAT_VENV/bin/activate"
+            nohup streamlit run "$FORMAT_DIR/app.py" --server.headless true > "$FORMAT_DIR/.streamlit.log" 2>&1 &
+            disown
+            sleep 2
+            if pgrep -f "streamlit run.*formatter/app.py" &>/dev/null; then
+                echo "Data Formatter is running."
+                echo "  UI: http://localhost:8501"
+                echo "  Log: $FORMAT_DIR/.streamlit.log"
+            else
+                echo "Failed to start. Check log: $FORMAT_DIR/.streamlit.log"
+                exit 1
+            fi
+            ;;
+        setup)
+            echo "Setting up Data Formatter..."
+            bash "$FORMAT_DIR/setup.sh"
+            ;;
+        stop)
+            echo "Stopping Data Formatter..."
+            pkill -f "streamlit run.*formatter/app.py" 2>/dev/null && echo "Data Formatter stopped." || echo "Data Formatter is not running."
+            ;;
+        status)
+            if pgrep -f "streamlit run.*formatter/app.py" &>/dev/null; then
+                local pid
+                pid=$(pgrep -f "streamlit run.*formatter/app.py" | head -1)
+                echo "Data Formatter is running (PID: $pid)"
+                echo "  UI: http://localhost:8501"
+            else
+                echo "Data Formatter is not running."
+            fi
+            ;;
+        *)
+            echo "Unknown format command: $subcmd"
+            echo ""
+            echo "Usage: vv format <command>"
+            echo ""
+            echo "Commands:"
+            echo "  setup   Install dependencies and configure the formatter"
+            echo "  start   Launch the Streamlit GUI (default)"
+            echo "  stop    Stop the running formatter"
+            echo "  status  Check if the formatter is running"
+            exit 1
+            ;;
+    esac
+}
+
+cmd_help() {
+    cat <<'HELP'
+VowVector CLI
+
+Usage: vv <command> [options]
+
+Stack Management:
+  start              Build images, start all 5 services, load embedding model
+  stop               Stop and remove all containers
+  restart            Stop then start
+  status             Show container status and health
+  logs [service]     Tail logs from all services (or one: neo4j, qdrant, ollama, backend, frontend)
+  verify             Health-check all 5 endpoints + GPU status
+  reset              Soft reset: wipe graph + vectors, keep containers
+  reset --full       Full reset: destroy containers + volumes
+
+Data Formatter:
+  format setup       Install dependencies and configure the formatter
+  format start       Launch Data Formatter GUI (http://localhost:8501)
+  format stop        Stop the Data Formatter
+  format status      Check if Data Formatter is running
+
+General:
+  help               Show this help message
+HELP
+}
+
+case "${1:-help}" in
+    start)   cmd_start ;;
+    stop)    cmd_stop ;;
+    restart) cmd_restart ;;
+    status)  cmd_status ;;
+    logs)    shift; cmd_logs "$@" ;;
+    verify)  cmd_verify ;;
+    reset)   shift; cmd_reset "$@" ;;
+    format)  shift; cmd_format "$@" ;;
+    help|--help|-h) cmd_help ;;
+    *)
+        echo "Unknown command: $1"
+        echo ""
+        cmd_help
+        exit 1
+        ;;
+esac
