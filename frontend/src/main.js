@@ -16,6 +16,8 @@ import {
   getGraphNodes,
   highlightNodes,
   setSelectionMode,
+  setNodeTypeVisible,
+  reclusterByTags,
 } from './visualization/graph3d.js';
 import { createUploadModal } from './components/UploadModal.js';
 import { createNodePanel } from './components/NodePanel.js';
@@ -315,6 +317,30 @@ async function init() {
   if (staticToggle) {
     staticToggle.addEventListener('change', () => {
       setStaticMode(staticToggle.checked);
+    });
+  }
+
+  // Filter panel — toggle node type visibility
+  const filterPanel = document.getElementById('filter-panel');
+  const filterToggle = document.getElementById('filter-toggle');
+  if (filterToggle && filterPanel) {
+    filterToggle.addEventListener('click', () => {
+      filterPanel.classList.toggle('collapsed');
+      filterToggle.textContent = filterPanel.classList.contains('collapsed') ? '▸' : '▾';
+    });
+  }
+  const filterCheckboxes = document.querySelectorAll('#filter-body input[data-node-type]');
+  filterCheckboxes.forEach((cb) => {
+    cb.addEventListener('change', () => {
+      setNodeTypeVisible(cb.dataset.nodeType, cb.checked);
+    });
+  });
+
+  // Recluster button
+  const reclusterBtn = document.getElementById('recluster-btn');
+  if (reclusterBtn) {
+    reclusterBtn.addEventListener('click', () => {
+      reclusterByTags();
     });
   }
 

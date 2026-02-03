@@ -83,3 +83,44 @@ class LinkResponse(BaseModel):
 class GraphData(BaseModel):
     nodes: list[NodeResponse] = []
     links: list[LinkResponse] = []
+
+
+# --- Conversation batch import models ---
+
+
+class ConversationMessage(BaseModel):
+    role: str
+    text: str = ""
+
+
+class ConversationImport(BaseModel):
+    conversation_id: Optional[str] = None
+    title: str
+    create_time: Optional[float] = None
+    update_time: Optional[float] = None
+    messages: list[ConversationMessage] = []
+    original_file: str = ""
+
+
+class ConversationBatchRequest(BaseModel):
+    conversations: list[ConversationImport]
+    group_name: Optional[str] = None
+    user_tags: list[str] = Field(default_factory=list)
+    group_scale: float = 1.5
+    group_color: str = "#FFD700"
+
+
+class ConversationBatchResponse(BaseModel):
+    imported: int
+    failed: int
+    tag_summary: dict[str, int] = {}
+    errors: list[str] = []
+
+
+class ConnectRequest(BaseModel):
+    connection_threshold: int = 2
+    max_tag_frequency: int = 100
+
+
+class ConnectResponse(BaseModel):
+    connections_created: int

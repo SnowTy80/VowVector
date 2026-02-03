@@ -86,6 +86,55 @@
       text-align: right;
     }
 
+    /* Filter panel */
+    #filter-panel {
+      position: fixed;
+      top: 40px;
+      right: 16px;
+      background: rgba(10, 10, 15, 0.85);
+      border: 1px solid #00ff9d30;
+      padding: 10px 12px;
+      width: 180px;
+      pointer-events: auto;
+      z-index: 100;
+      font-size: 12px;
+    }
+    #filter-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .filter-title {
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-size: 11px;
+      color: #00ff9d;
+      text-shadow: 0 0 6px #00ff9d60;
+    }
+    #filter-panel.collapsed #filter-body { display: none; }
+    .filter-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 0;
+      cursor: pointer;
+      color: #00ff9dcc;
+      font-size: 12px;
+    }
+    .filter-row:hover { color: #00ff9d; }
+    .filter-row input[type="checkbox"] {
+      accent-color: #00ff9d;
+      cursor: pointer;
+    }
+    .filter-swatch {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      box-shadow: 0 0 4px currentColor;
+    }
+
     /* Action bar */
     #action-bar {
       position: fixed;
@@ -333,6 +382,103 @@
     }
     .result-ok { color: #00ff9d; margin-bottom: 4px; }
     .result-fail { color: #ff0040; margin-bottom: 4px; }
+
+    /* Conversation import options */
+    #convo-options {
+      margin-bottom: 10px;
+      padding: 8px 10px;
+      background: #0a0a0f;
+      border: 1px solid #00ff9d20;
+    }
+    #convo-options .upload-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #convo-options input[type="range"] {
+      flex: 1;
+      accent-color: #00ff9d;
+    }
+    #connect-threshold-value {
+      color: #00ff9d;
+      font-weight: bold;
+      min-width: 16px;
+      text-align: center;
+    }
+    .convo-hint {
+      font-size: 10px;
+      color: #00ff9d60;
+      margin-top: 4px;
+    }
+
+    /* Import progress bar */
+    #import-progress {
+      margin-bottom: 10px;
+      padding: 8px 10px;
+      background: #0a0a0f;
+      border: 1px solid #00ff9d20;
+    }
+    .progress-phase {
+      font-size: 11px;
+      color: #00ff9d;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 6px;
+      text-shadow: 0 0 6px #00ff9d60;
+    }
+    .progress-bar {
+      width: 100%;
+      height: 6px;
+      background: #0d0d14;
+      border: 1px solid #00ff9d30;
+      margin-bottom: 6px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: #00ff9d;
+      box-shadow: 0 0 8px #00ff9d80;
+      transition: width 0.3s ease;
+    }
+    .progress-detail {
+      font-size: 11px;
+      color: #00ff9d99;
+    }
+
+    /* Import summary */
+    #import-summary {
+      margin-top: 10px;
+      padding: 10px 12px;
+      background: #0a0a0f;
+      border: 1px solid #00ff9d30;
+      font-size: 11px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .summary-section {
+      margin-bottom: 8px;
+    }
+    .summary-section:last-child {
+      margin-bottom: 0;
+    }
+    .summary-title {
+      color: #00ff9d;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+      text-shadow: 0 0 6px #00ff9d60;
+    }
+    .summary-stat {
+      color: #00ff9dcc;
+      margin-bottom: 2px;
+      padding-left: 8px;
+    }
+    .summary-warn {
+      color: #ff0040;
+      text-shadow: 0 0 4px #ff004060;
+    }
 
     /* Raw entry */
     #raw-entry {
@@ -905,7 +1051,7 @@
       </div>
       <div class="motion-row">
         <label for="spread-slider">Spread</label>
-        <input id="spread-slider" type="range" min="40" max="160" value="80" />
+        <input id="spread-slider" type="range" min="40" max="600" value="80" />
         <input id="spread-input" type="number" min="1" step="1" value="80" />
       </div>
       <div class="motion-row">
@@ -945,6 +1091,55 @@
         <input id="orbit-speed" type="range" min="0" max="2" step="0.05" value="0.35" />
         <span id="orbit-speed-value">0.35</span>
       </div>
+    </div>
+  </div>
+  <div id="filter-panel" class="hud">
+    <div id="filter-header">
+      <span class="filter-title">LAYERS</span>
+      <button id="filter-toggle" class="ghost">▾</button>
+    </div>
+    <div id="filter-body">
+      <button id="recluster-btn" class="ghost" style="width:100%;margin-bottom:8px;font-size:10px;letter-spacing:1px;">RECLUSTER BY TAGS</button>
+      <label class="filter-row">
+        <input type="checkbox" data-node-type="Note" checked />
+        <span class="filter-swatch" style="background:#00FFFF;"></span>
+        Notes
+      </label>
+      <label class="filter-row">
+        <input type="checkbox" data-node-type="Code" checked />
+        <span class="filter-swatch" style="background:#FF00FF;"></span>
+        Code
+      </label>
+      <label class="filter-row">
+        <input type="checkbox" data-node-type="AIInteraction" checked />
+        <span class="filter-swatch" style="background:#00FF00;"></span>
+        Conversations
+      </label>
+      <label class="filter-row">
+        <input type="checkbox" data-node-type="Research" checked />
+        <span class="filter-swatch" style="background:#FF0080;"></span>
+        Research
+      </label>
+      <label class="filter-row">
+        <input type="checkbox" data-node-type="Project" checked />
+        <span class="filter-swatch" style="background:#FFD700;"></span>
+        Projects
+      </label>
+      <label class="filter-row">
+        <input type="checkbox" data-node-type="Topic" checked />
+        <span class="filter-swatch" style="background:#1E90FF;"></span>
+        Topics
+      </label>
+      <label class="filter-row">
+        <input type="checkbox" data-node-type="Concept" checked />
+        <span class="filter-swatch" style="background:#8A2BE2;"></span>
+        Concepts
+      </label>
+      <label class="filter-row">
+        <input type="checkbox" data-node-type="Tag" checked />
+        <span class="filter-swatch" style="background:#FF4500;"></span>
+        Tags
+      </label>
     </div>
   </div>
   <script type="module" src="/src/main.js"></script>

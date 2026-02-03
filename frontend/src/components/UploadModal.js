@@ -154,8 +154,22 @@ export function createUploadModal(onUploadSuccess) {
         <button id="upload-start">UPLOAD SELECTED</button>
         <button id="purge-conversations" style="display:none;">PURGE CONVERSATIONS</button>
       </div>
+      <div id="convo-options" style="display:none;">
+        <div class="upload-row">
+          <label for="connect-threshold">Connection Threshold</label>
+          <input id="connect-threshold" type="range" min="1" max="5" step="1" value="2" />
+          <span id="connect-threshold-value">2</span>
+        </div>
+        <div class="convo-hint">Min shared content tags to auto-connect conversations</div>
+      </div>
+      <div id="import-progress" style="display:none;">
+        <div class="progress-phase" id="progress-phase">PARSING</div>
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        <div class="progress-detail" id="progress-detail"></div>
+      </div>
       <div id="upload-status"></div>
       <div id="upload-results"></div>
+      <div id="import-summary" style="display:none;"></div>
     </div>
   `;
   document.body.appendChild(overlay);
@@ -187,6 +201,14 @@ export function createUploadModal(onUploadSuccess) {
   const groupSizeValue = overlay.querySelector('#group-size-value');
   const groupColor = overlay.querySelector('#group-color');
   const purgeBtn = overlay.querySelector('#purge-conversations');
+  const convoOptions = overlay.querySelector('#convo-options');
+  const connectThreshold = overlay.querySelector('#connect-threshold');
+  const connectThresholdValue = overlay.querySelector('#connect-threshold-value');
+  const importProgress = overlay.querySelector('#import-progress');
+  const progressPhase = overlay.querySelector('#progress-phase');
+  const progressFill = overlay.querySelector('#progress-fill');
+  const progressDetail = overlay.querySelector('#progress-detail');
+  const importSummary = overlay.querySelector('#import-summary');
 
   let isOpen = false;
   let queuedFiles = [];
@@ -216,6 +238,12 @@ export function createUploadModal(onUploadSuccess) {
     tagsInput.value = '';
     rawContent.value = '';
     autoToggle.checked = false;
+    importProgress.style.display = 'none';
+    importSummary.style.display = 'none';
+    importSummary.innerHTML = '';
+    progressFill.style.width = '0%';
+    connectThreshold.value = '2';
+    connectThresholdValue.textContent = '2';
   }
 
   // Close on overlay click (not modal)
@@ -271,6 +299,10 @@ export function createUploadModal(onUploadSuccess) {
       groupSizeValue.textContent = `${groupSize.value}x`;
     });
   }
+
+  connectThreshold.addEventListener('input', () => {
+    connectThresholdValue.textContent = connectThreshold.value;
+  });
 
   async function handleFiles(fileList) {
     const files = Array.from(fileList);
@@ -415,86 +447,98 @@ export function createUploadModal(onUploadSuccess) {
   }
 
   async function uploadConversations() {
+    const BATCH_SIZE = 50;
     totalToUpload = queuedFiles.length;
     uploadedCount = 0;
-    statusEl.textContent = `Importing ${totalToUpload} conversation(s)...`;
     resultsEl.innerHTML = '';
+    importSummary.style.display = 'none';
+    importSummary.innerHTML = '';
+    importProgress.style.display = 'block';
 
-    // Create top-level Project group node for the folder
-    const firstGroup = queuedFiles[0]?.groupName;
-    let projectId = null;
-    if (firstGroup) {
-      projectId = await ensureGroupNode(firstGroup);
-    }
+    // --- Phase 1: Parse all JSON files ---
+    progressPhase.textContent = 'PHASE 1: PARSING';
+    progressFill.style.width = '0%';
+    progressDetail.textContent = `0 / ${totalToUpload}`;
 
-    const userTags = splitTags(tagsInput.value);
+    const conversations = [];
+    const parseErrors = [];
 
-    for (const item of queuedFiles) {
+    for (let i = 0; i < queuedFiles.length; i++) {
+      const item = queuedFiles[i];
       const file = item.file;
+
       if (!file.name.endsWith('.json')) {
-        resultsEl.innerHTML += `<div class="result-fail">${file.name}: skipped (not .json)</div>`;
-        uploadedCount += 1;
-        statusEl.textContent = `Importing ${uploadedCount}/${totalToUpload} conversation(s)...`;
+        parseErrors.push(file.name + ': not .json');
         continue;
       }
 
-      let convo;
       try {
         const raw = await file.text();
-        convo = JSON.parse(raw);
+        const convo = JSON.parse(raw);
+        conversations.push({
+          conversation_id: convo.conversation_id || null,
+          title: convo.title || file.name.replace('.json', ''),
+          create_time: convo.create_time || null,
+          update_time: convo.update_time || null,
+          messages: (convo.messages || []).map((m) => ({
+            role: m.role || 'user',
+            text: m.text || '',
+          })),
+          original_file: file.name,
+        });
       } catch {
-        resultsEl.innerHTML += `<div class="result-fail">${file.name}: invalid JSON</div>`;
-        uploadedCount += 1;
-        statusEl.textContent = `Importing ${uploadedCount}/${totalToUpload} conversation(s)...`;
-        continue;
+        parseErrors.push(file.name + ': invalid JSON');
       }
 
-      const content = formatConversationContent(convo);
-      const title = convo.title || file.name.replace('.json', '');
-      const msgCount = (convo.messages || []).length;
-      const userMsgCount = (convo.messages || []).filter((m) => m.role === 'user').length;
-      const assistantMsgCount = msgCount - userMsgCount;
-      const monthKey = convoMonthKey(convo.create_time);
-      const scale = convoMsgScale(msgCount);
+      const pct = Math.round(((i + 1) / queuedFiles.length) * 100);
+      progressFill.style.width = pct + '%';
+      progressDetail.textContent = `${i + 1} / ${totalToUpload}`;
+    }
 
-      const tags = [
-        'conversation',
-        'imported',
-        'type:aiinteraction',
-        `month:${monthKey}`,
-        `messages:${msgCount}`,
-        ...userTags,
-      ];
-      if (item.groupName) {
-        tags.push(`group:${item.groupName}`);
-      }
+    if (parseErrors.length) {
+      resultsEl.innerHTML = parseErrors
+        .map((e) => `<div class="result-fail">${e}</div>`)
+        .join('');
+    }
 
-      const metadata = {
-        source: 'conversation-import',
-        conversation_id: convo.conversation_id || null,
-        message_count: msgCount,
-        user_messages: userMsgCount,
-        assistant_messages: assistantMsgCount,
-        node_scale: scale,
-        original_file: file.name,
-      };
-      if (convo.create_time) {
-        metadata.conversation_created = new Date(convo.create_time * 1000).toISOString();
-      }
-      if (convo.update_time) {
-        metadata.conversation_updated = new Date(convo.update_time * 1000).toISOString();
-      }
+    if (!conversations.length) {
+      statusEl.textContent = 'No valid conversations found.';
+      importProgress.style.display = 'none';
+      queuedFiles = [];
+      renderQueue();
+      return;
+    }
+
+    // --- Phase 2: Import in batches ---
+    progressPhase.textContent = 'PHASE 2: IMPORTING';
+    progressFill.style.width = '0%';
+
+    const firstGroup = queuedFiles[0]?.groupName || null;
+    const userTags = splitTags(tagsInput.value);
+    const totalBatches = Math.ceil(conversations.length / BATCH_SIZE);
+    let totalImported = 0;
+    let totalFailed = 0;
+    const allErrors = [];
+    const mergedTagSummary = {};
+
+    for (let b = 0; b < totalBatches; b++) {
+      const batch = conversations.slice(b * BATCH_SIZE, (b + 1) * BATCH_SIZE);
+      const batchNum = b + 1;
+
+      progressDetail.textContent = `Batch ${batchNum} / ${totalBatches} — ${totalImported} imported`;
+      const pct = Math.round((b / totalBatches) * 100);
+      progressFill.style.width = pct + '%';
 
       const payload = {
-        title,
-        content,
-        node_type: 'AIInteraction',
-        tags,
-        metadata,
+        conversations: batch,
+        group_name: batchNum === 1 ? firstGroup : null,
+        user_tags: userTags,
+        group_scale: parseFloat(groupSize?.value || '1.5'),
+        group_color: groupColor?.value || '#FFD700',
       };
 
       try {
-        const res = await fetch('/api/nodes', {
+        const res = await fetch('/api/conversations/import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -502,31 +546,99 @@ export function createUploadModal(onUploadSuccess) {
 
         if (!res.ok) {
           const err = await res.json().catch(() => ({ detail: res.statusText }));
-          resultsEl.innerHTML += `<div class="result-fail">${file.name}: ${err.detail}</div>`;
-          uploadedCount += 1;
-          statusEl.textContent = `Importing ${uploadedCount}/${totalToUpload} conversation(s)...`;
+          allErrors.push(`Batch ${batchNum}: ${err.detail}`);
+          totalFailed += batch.length;
           continue;
         }
 
-        const node = await res.json();
-        resultsEl.innerHTML += `<div class="result-ok">${title} → ${monthKey} (${msgCount} msgs)</div>`;
+        const data = await res.json();
+        totalImported += data.imported;
+        totalFailed += data.failed;
+        if (data.errors) allErrors.push(...data.errors);
 
-        // Link conversation → month Topic → Project
-        const monthId = await ensureMonthNode(monthKey, projectId);
-        if (monthId) {
-          await createBelongsToLink(node.id, monthId);
+        // Merge tag summaries
+        for (const [tag, count] of Object.entries(data.tag_summary || {})) {
+          mergedTagSummary[tag] = (mergedTagSummary[tag] || 0) + count;
         }
-
-        if (onUploadSuccess) onUploadSuccess(node);
       } catch (err) {
-        resultsEl.innerHTML += `<div class="result-fail">${file.name}: ${err.message}</div>`;
+        allErrors.push(`Batch ${batchNum}: ${err.message}`);
+        totalFailed += batch.length;
       }
-
-      uploadedCount += 1;
-      statusEl.textContent = `Importing ${uploadedCount}/${totalToUpload} conversation(s)...`;
     }
 
-    statusEl.textContent = `Done. Imported ${uploadedCount} conversation(s).`;
+    progressFill.style.width = '100%';
+    progressDetail.textContent = `${totalImported} imported, ${totalFailed} failed`;
+
+    // --- Phase 3: Build connections ---
+    progressPhase.textContent = 'PHASE 3: CONNECTING';
+    progressFill.style.width = '50%';
+    progressDetail.textContent = 'Building tag-based connections...';
+
+    let connectionsCreated = 0;
+    const threshold = parseInt(connectThreshold.value, 10) || 2;
+
+    try {
+      const res = await fetch('/api/conversations/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          connection_threshold: threshold,
+          max_tag_frequency: 100,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        connectionsCreated = data.connections_created;
+      }
+    } catch {
+      allErrors.push('Connection building failed');
+    }
+
+    progressFill.style.width = '100%';
+    progressPhase.textContent = 'COMPLETE';
+    progressDetail.textContent = '';
+
+    // --- Build import summary ---
+    const sortedTags = Object.entries(mergedTagSummary)
+      .sort((a, b) => b[1] - a[1]);
+
+    const domainTags = sortedTags.filter(([t]) => t.startsWith('domain:')).slice(0, 5);
+    const intentTags = sortedTags.filter(([t]) => t.startsWith('intent:')).slice(0, 5);
+    const topicCount = sortedTags.filter(([t]) => t.startsWith('topic:')).length;
+
+    let summaryHtml = `<div class="summary-section">
+      <div class="summary-title">IMPORT COMPLETE</div>
+      <div class="summary-stat">${totalImported} conversations imported</div>
+      ${totalFailed > 0 ? `<div class="summary-stat summary-warn">${totalFailed} failed</div>` : ''}
+      ${parseErrors.length > 0 ? `<div class="summary-stat summary-warn">${parseErrors.length} parse errors (skipped)</div>` : ''}
+    </div>`;
+
+    summaryHtml += `<div class="summary-section">
+      <div class="summary-title">AUTO-TAGS GENERATED</div>
+      ${domainTags.length ? `<div class="summary-stat">Top domains: ${domainTags.map(([t, c]) => `${t.replace('domain:', '')} (${c})`).join(', ')}</div>` : ''}
+      ${intentTags.length ? `<div class="summary-stat">Intents: ${intentTags.map(([t, c]) => `${t.replace('intent:', '')} (${c})`).join(', ')}</div>` : ''}
+      <div class="summary-stat">Unique topic tags: ${topicCount}</div>
+    </div>`;
+
+    summaryHtml += `<div class="summary-section">
+      <div class="summary-title">CONNECTIONS BUILT</div>
+      <div class="summary-stat">${connectionsCreated} connections created (threshold: ${threshold}+ shared tags)</div>
+    </div>`;
+
+    if (allErrors.length) {
+      summaryHtml += `<div class="summary-section">
+        <div class="summary-title summary-warn">ERRORS</div>
+        ${allErrors.slice(0, 10).map((e) => `<div class="summary-stat summary-warn">${e}</div>`).join('')}
+        ${allErrors.length > 10 ? `<div class="summary-stat summary-warn">...and ${allErrors.length - 10} more</div>` : ''}
+      </div>`;
+    }
+
+    importSummary.innerHTML = summaryHtml;
+    importSummary.style.display = 'block';
+
+    statusEl.textContent = `Done. ${totalImported} imported, ${connectionsCreated} connections.`;
+    if (onUploadSuccess) onUploadSuccess(null);
     queuedFiles = [];
     renderQueue();
   }
@@ -702,6 +814,7 @@ export function createUploadModal(onUploadSuccess) {
     // For Conversation Data: hide individual file drop, show only folder upload + purge btn
     const isConvo = !!cfg.conversationImport;
     purgeBtn.style.display = isConvo ? 'inline-block' : 'none';
+    convoOptions.style.display = isConvo ? 'block' : 'none';
     if (isConvo && modeSelect.value === 'file') {
       dropZone.style.display = 'none';
       document.getElementById('folder-upload').style.display = 'flex';

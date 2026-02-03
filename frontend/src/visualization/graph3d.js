@@ -6,6 +6,54 @@ let graph = null;
 let baseLinkDistance = 80;
 let baseCharge = -120;
 
+// Node type visibility filter
+let hiddenNodeTypes = new Set();
+let unfilteredData = { nodes: [], links: [] };
+
+// --- Tag-based spatial clustering ---
+
+function getNodeClusterKey(node) {
+  const tags = node.tags || [];
+  // Priority: first domain: tag, then intent: tag, then node_type
+  for (const t of tags) {
+    if (t.startsWith('domain:')) return t;
+  }
+  for (const t of tags) {
+    if (t.startsWith('intent:')) return t;
+  }
+  // Fall back to month cluster for conversations
+  for (const t of tags) {
+    if (t.startsWith('month:')) return t;
+  }
+  return `type:${node.node_type || 'Unknown'}`;
+}
+
+// Fibonacci sphere: distributes N points evenly on a sphere of given radius
+function fibonacciSphere(index, total, radius) {
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  const y = 1 - (index / (total - 1 || 1)) * 2; // -1 to 1
+  const r = Math.sqrt(1 - y * y);
+  const theta = goldenAngle * index;
+  return {
+    x: Math.cos(theta) * r * radius,
+    y: y * radius,
+    z: Math.sin(theta) * r * radius,
+  };
+}
+
+function computeClusterCenters(nodes, radius) {
+  // Collect unique cluster keys
+  const keys = new Set();
+  for (const n of nodes) keys.add(getNodeClusterKey(n));
+  const keyArr = [...keys].sort();
+  const centers = new Map();
+  const total = keyArr.length;
+  for (let i = 0; i < total; i++) {
+    centers.set(keyArr[i], fibonacciSphere(i, total, radius));
+  }
+  return centers;
+}
+
 // --- Position persistence via localStorage ---
 const POSITIONS_KEY = 'vv_node_positions';
 
@@ -176,6 +224,22 @@ export function setNodeClickHandler(handler) {
 export function updateGraphData(data) {
   if (!graph) return;
 
+  // Store unfiltered data for type filtering
+  unfilteredData = { nodes: data.nodes || [], links: data.links || [] };
+
+  // Apply node type filter
+  const filteredData = applyTypeFilter(unfilteredData);
+
+  // Auto-scale forces for large graphs
+  const nodeCount = filteredData.nodes.length;
+  if (nodeCount > 100) {
+    const scaleFactor = Math.sqrt(nodeCount / 50);
+    const autoDistance = Math.max(baseLinkDistance, 80 * scaleFactor);
+    const autoCharge = -120 * scaleFactor;
+    graph.d3Force('link').distance(autoDistance);
+    graph.d3Force('charge').strength(autoCharge);
+  }
+
   const camera = graph.camera();
   const controls = graph.controls();
   const cameraPos = camera?.position?.clone();
@@ -185,7 +249,12 @@ export function updateGraphData(data) {
   const prev = graph.graphData();
   const prevMap = new Map((prev?.nodes || []).map((n) => [n.id, n]));
   const saved = loadSavedPositions();
-  const nodes = data.nodes.map((n) => {
+
+  // Compute cluster centers for tag-based spatial grouping
+  const clusterRadius = Math.max(120, baseLinkDistance * 2, Math.sqrt(nodeCount) * 20);
+  const clusterCenters = computeClusterCenters(filteredData.nodes, clusterRadius);
+
+  const nodes = filteredData.nodes.map((n) => {
     // 1. Prefer in-memory position (current session)
     const prevNode = prevMap.get(n.id);
     if (prevNode && prevNode.x !== undefined) {
@@ -204,18 +273,20 @@ export function updateGraphData(data) {
     if (s) {
       return { ...n, x: s.x, y: s.y, z: s.z, fx: s.x, fy: s.y, fz: s.z };
     }
-    // 3. New node — random jitter near camera target
-    const base = controlsTarget || { x: 0, y: 0, z: 0 };
-    const jitter = () => (Math.random() - 0.5) * 40;
-    const x = base.x + jitter();
-    const y = base.y + jitter();
-    const z = base.z + jitter();
+    // 3. New node — position near cluster center based on tags
+    const clusterKey = getNodeClusterKey(n);
+    const center = clusterCenters.get(clusterKey) || { x: 0, y: 0, z: 0 };
+    const jitterRange = Math.max(30, clusterRadius * 0.25);
+    const jitter = () => (Math.random() - 0.5) * jitterRange;
+    const x = center.x + jitter();
+    const y = center.y + jitter();
+    const z = center.z + jitter();
     return { ...n, x, y, z, fx: x, fy: y, fz: z };
   });
   // Persist positions (captures restored + new nodes)
   // Deferred so graph.graphData() reflects the new data
   requestAnimationFrame(savePositions);
-  const links = data.links.map((l) => ({ ...l }));
+  const links = filteredData.links.map((l) => ({ ...l }));
 
   graph.graphData({ nodes, links });
 
@@ -272,10 +343,63 @@ export function getGraphInstance() {
 
 export function setGraphSpread(spread) {
   if (!graph) return;
+  const oldSpread = baseLinkDistance;
   baseLinkDistance = spread;
   graph.d3Force('link').distance(baseLinkDistance);
   graph.d3Force('charge').strength(baseCharge * (baseLinkDistance / 80));
-  graph.d3ReheatSimulation();
+
+  // Directly scale all node positions from centroid
+  const nodes = graph.graphData().nodes || [];
+  if (nodes.length && oldSpread > 0) {
+    const ratio = spread / oldSpread;
+    // Compute centroid
+    let cx = 0, cy = 0, cz = 0;
+    for (const n of nodes) { cx += n.x || 0; cy += n.y || 0; cz += n.z || 0; }
+    cx /= nodes.length; cy /= nodes.length; cz /= nodes.length;
+    // Scale positions outward from centroid
+    for (const n of nodes) {
+      n.x = cx + (n.x - cx) * ratio;
+      n.y = cy + (n.y - cy) * ratio;
+      n.z = cz + (n.z - cz) * ratio;
+      n.fx = n.x;
+      n.fy = n.y;
+      n.fz = n.z;
+    }
+    requestAnimationFrame(savePositions);
+  }
+  graph.refresh();
+}
+
+/**
+ * Re-cluster all nodes by their tags. Clears saved positions and
+ * repositions everything using tag-based spatial grouping.
+ */
+export function reclusterByTags() {
+  if (!graph) return;
+  // Clear saved positions so all nodes get fresh cluster placement
+  try { localStorage.removeItem(POSITIONS_KEY); } catch { /* ignore */ }
+
+  const data = graph.graphData();
+  const nodes = data.nodes || [];
+  const nodeCount = nodes.length;
+  const clusterRadius = Math.max(120, baseLinkDistance * 2, Math.sqrt(nodeCount) * 20);
+  const clusterCenters = computeClusterCenters(nodes, clusterRadius);
+
+  for (const n of nodes) {
+    const clusterKey = getNodeClusterKey(n);
+    const center = clusterCenters.get(clusterKey) || { x: 0, y: 0, z: 0 };
+    const jitterRange = Math.max(30, clusterRadius * 0.25);
+    const jitter = () => (Math.random() - 0.5) * jitterRange;
+    n.x = center.x + jitter();
+    n.y = center.y + jitter();
+    n.z = center.z + jitter();
+    n.fx = n.x;
+    n.fy = n.y;
+    n.fz = n.z;
+  }
+
+  graph.graphData({ nodes, links: data.links });
+  requestAnimationFrame(savePositions);
   graph.refresh();
 }
 
@@ -397,4 +521,32 @@ export function setSelectionMode(enabled) {
   graph.enableNodeDrag(!enabled);
   const controls = graph.controls();
   if (controls) controls.enabled = !enabled;
+}
+
+// --- Node type filtering ---
+
+function applyTypeFilter(data) {
+  if (hiddenNodeTypes.size === 0) return data;
+  const visibleNodes = data.nodes.filter((n) => !hiddenNodeTypes.has(n.node_type));
+  const visibleIds = new Set(visibleNodes.map((n) => n.id));
+  const visibleLinks = data.links.filter(
+    (l) => visibleIds.has(l.source_id) && visibleIds.has(l.target_id)
+  );
+  return { nodes: visibleNodes, links: visibleLinks };
+}
+
+export function setNodeTypeVisible(nodeType, visible) {
+  if (visible) {
+    hiddenNodeTypes.delete(nodeType);
+  } else {
+    hiddenNodeTypes.add(nodeType);
+  }
+  // Re-apply filter on stored unfiltered data
+  if (unfilteredData.nodes.length) {
+    updateGraphData(unfilteredData);
+  }
+}
+
+export function getHiddenNodeTypes() {
+  return new Set(hiddenNodeTypes);
 }
