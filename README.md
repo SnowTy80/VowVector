@@ -12,7 +12,8 @@ Everything runs on your machine via Docker. No cloud dependencies.
 Support for this tool will continue but spotty, as this is being developed for personal-use. The 3D visualizer for QDrant Vector storage containers is the first tool in a series of an agenic-focused aresenal, aimed for seemless orchestration for the proper handling, foarmatting, and indexing of complex data-sets. 
 
 
-
+Watch me upload 4 years of conversations with ChatGPT/Grok into this tool and watch it grow progressively:
+https://www.youtube.com/watch?v=3ltH7R0NfKA
 
 
 
