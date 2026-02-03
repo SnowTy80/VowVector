@@ -9,6 +9,13 @@ A local, GPU-accelerated knowledge graph system with 3D visualization. Ingest fi
 
 Everything runs on your machine via Docker. No cloud dependencies.
 
+Support for this tool will continue but spotty, as this is being developed for personal-use. The 3D visualizer for QDrant Vector storage containers is the first tool in a series of an agenic-focused aresenal, aimed for seemless orchestration for the proper handling, foarmatting, and indexing of complex data-sets. 
+
+
+
+
+
+
 ---
 
 ## Table of Contents
@@ -763,3 +770,12 @@ VowVector/
 - Embedding model GGUF files are mounted read-only from `models/`.
 - The Data Formatter runs on the host (not in Docker) and uses its own Python venv at `formatter/.venv`.
 - The Nanonets OCR model is optional. Tesseract handles most documents well. Nanonets is better for complex layouts and stylized text.
+
+---
+## VowVector
+
+-VowVector is a start-up between a friend & I, that focuses on the methods used for both, the transparency & privacy methods to consider with proper data handling.
+-Developed primarily for H.I.L(Human in Loop) automation with systems like Linux/Windows. 
+
+
+**AI-Assisted** Tools like Codex & Claude;IDE were used to assist in the development of this codespace. 
